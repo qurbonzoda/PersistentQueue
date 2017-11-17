@@ -21,7 +21,9 @@ class PersistentQueueTests {
 
     @Test
     fun dequeueForNewQueueShouldThrow() {
-        assertThrows(NoSuchElementException::class.java) { PersistentQueue<Int>().dequeue() }
+        assertThrows(NoSuchElementException::class.java) {
+            PersistentQueue<Int>().dequeue()
+        }
     }
 
     @Test

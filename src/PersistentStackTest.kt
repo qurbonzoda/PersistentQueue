@@ -21,7 +21,9 @@ class PersistentStackTests {
 
     @Test
     fun popForNewStackShouldThrowEmptyStackException() {
-        assertThrows(NoSuchElementException::class.java) { PersistentStack<Int>().pop() }
+        assertThrows(NoSuchElementException::class.java) {
+            PersistentStack<Int>().pop()
+        }
     }
 
     @Test

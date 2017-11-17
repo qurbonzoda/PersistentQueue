@@ -3,12 +3,11 @@
  */
 
 class PersistentStack<T> private constructor(private val top: Node<T>?, val size: Int) {
-
     constructor() : this(null, 0)
 
-    fun isEmpty(): Boolean = top == null
+    fun isEmpty() = top == null
 
-    fun peek(): T? = top?.value
+    fun peek() = top?.value
 
     fun pop(): PopResult<T> {
         if (top == null) {
@@ -17,7 +16,7 @@ class PersistentStack<T> private constructor(private val top: Node<T>?, val size
         return PopResult(PersistentStack(top.previous, size = size - 1), top.value)
     }
 
-    fun push(value: T): PersistentStack<T> = PersistentStack(Node(value, top), size + 1)
+    fun push(value: T) = PersistentStack(Node(value, top), size = size + 1)
 
     private data class Node<T>(val value: T, val previous: Node<T>?)
 

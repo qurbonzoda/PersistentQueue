@@ -2,89 +2,142 @@
  * Created by a.qurbonzoda on 14.11.17.
  */
 
-private sealed class State<T>
+class PersistentQueue<T> private constructor(
+        private val l: PersistentStack<T>,
+        private val _l: PersistentStack<T>,
+        private val r: PersistentStack<T>,
+        private val _r: PersistentStack<T>,
+        private val s: PersistentStack<T>,
+        private val toCopyFromSToR: Int,
+        private val isLCopiedToR: Boolean,
+        private val isRecopyState: Boolean
+) {
+    private constructor(emptyStack: PersistentStack<T>) : this(
+            l = emptyStack,
+            _l = emptyStack,
+            r = emptyStack,
+            _r = emptyStack,
+            s = emptyStack,
+            toCopyFromSToR = 0,
+            isLCopiedToR = false,
+            isRecopyState = false
+    )
 
-private class Normal<T> : State<T>()
-private data class Recopy<T>(val _r: PersistentStack<T>,
-                             val s: PersistentStack<T>,
-                             val toCopy: Int,
-                             val isCopied: Boolean) : State<T>()
-
-class PersistentQueue<T> private constructor(private val l: PersistentStack<T>,
-                                             private val _l: PersistentStack<T>,
-                                             private val r: PersistentStack<T>,
-                                             private val state: State<T>) {
-    private constructor(emptyStack: PersistentStack<T>) : this(emptyStack, emptyStack, emptyStack, Normal<T>())
-
-    constructor() : this(PersistentStack<T>())
+    constructor() : this(emptyStack = PersistentStack<T>())
 
     val size: Int
-        get() = when (state) {
-            is Normal -> l.size + r.size
-            is Recopy -> _l.size + l.size + state.toCopy + if (state.isCopied) r.size else 0
+        get() {
+            if (!isRecopyState) return l.size + r.size
+            return _l.size + l.size + toCopyFromSToR + if (isLCopiedToR) r.size else 0
         }
 
-    fun isEmpty(): Boolean = when (state) {
-        is Normal -> r.isEmpty()
-        is Recopy -> false
+    fun isEmpty(): Boolean {
+        if (isRecopyState) return false
+        return r.isEmpty()
     }
 
-    fun front(): T? = when (state) {
-        is Normal -> r.peek()
-        is Recopy -> state._r.peek()
+    fun front(): T? {
+        if (isRecopyState) return _r.peek()
+        return r.peek()
     }
 
-    fun enqueue(value: T): PersistentQueue<T> = when (state) {
-        is Normal -> PersistentQueue(l.push(value), _l, r, state).checkRecopy()
-        is Recopy -> PersistentQueue(l, _l.push(value), r, state).checkNormal(state)
+    fun enqueue(value: T): PersistentQueue<T> {
+        if (isRecopyState) return PersistentQueue(
+                l = l,
+                _l = _l.push(value),
+                r = r,
+                _r = _r,
+                s = s,
+                toCopyFromSToR = toCopyFromSToR,
+                isLCopiedToR = isLCopiedToR,
+                isRecopyState = isRecopyState
+        ).checkNormal()
+
+        return PersistentQueue(
+                l = l.push(value),
+                _l = _l,
+                r = r,
+                _r = _r,
+                s = s,
+                toCopyFromSToR = toCopyFromSToR,
+                isLCopiedToR = isLCopiedToR,
+                isRecopyState = isRecopyState
+        ).checkRecopy()
     }
 
-    fun dequeue(): DequeueResult<T> = when (state) {
-        is Normal -> {
-            val rn = r.pop()
-            val newQueue = PersistentQueue(l, _l, rn.resultStack, state).checkRecopy()
-            DequeueResult(newQueue, rn.value)
+    fun dequeue(): DequeueResult<T> {
+        if (isRecopyState) {
+            assert(toCopyFromSToR > 0)
+
+            val _rn = _r.pop()
+            val newQueue = PersistentQueue(
+                    l = l,
+                    _l = _l,
+                    r = r,
+                    _r = _rn.resultStack,
+                    s = s,
+                    toCopyFromSToR = toCopyFromSToR - 1,
+                    isLCopiedToR = isLCopiedToR,
+                    isRecopyState = isRecopyState
+            ).checkNormal()
+            return DequeueResult(newQueue, _rn.value)
         }
-        is Recopy -> {
-            val _rn = state._r.pop()
-
-            assert(state.toCopy > 0)
-
-            val recopy = Recopy(_rn.resultStack, state.s, state.toCopy - 1, state.isCopied)
-            val newQueue = PersistentQueue(l, _l, r, recopy).checkNormal(recopy)
-            DequeueResult(newQueue, _rn.value)
-        }
+        val rn = r.pop()
+        val newQueue = PersistentQueue(
+                l = l,
+                _l = _l,
+                r = rn.resultStack,
+                _r = _r,
+                s = s,
+                toCopyFromSToR = toCopyFromSToR,
+                isLCopiedToR = isLCopiedToR,
+                isRecopyState = isRecopyState
+        ).checkRecopy()
+        return DequeueResult(newQueue, rn.value)
     }
 
-    private fun checkRecopy(): PersistentQueue<T> = when {
-        l.size <= r.size -> this
-        else -> {
+    private fun checkRecopy(): PersistentQueue<T> {
+        if (l.size > r.size) {
             assert(_l.isEmpty())
-
-            val recopy = Recopy(r, _l, r.size, false)
-            PersistentQueue(l, _l, r, recopy).checkNormal(recopy)
+            return PersistentQueue(
+                    l = l,
+                    _l = _l,
+                    r = r,
+                    _r = r,
+                    s = _l,
+                    toCopyFromSToR = r.size,
+                    isLCopiedToR = false,
+                    isRecopyState = true
+            ).checkNormal()
         }
+        return this
     }
 
-    private fun checkNormal(recopy: Recopy<T>): PersistentQueue<T> {
-        val (q, didFinishCopying) = doRecopy(recopy)
+    private fun checkNormal(): PersistentQueue<T> {
+        val q = doRecopy()
 
-        return if (didFinishCopying) {
+        if (q.toCopyFromSToR == 0) {
             assert(q.l.isEmpty())
-
-            PersistentQueue(q._l, q.l, q.r, Normal())
-        } else {
-            q
+            return PersistentQueue(
+                    l = q._l,
+                    _l = q.l,
+                    r = q.r,
+                    _r = q.l,
+                    s = q.l,
+                    toCopyFromSToR = 0,
+                    isLCopiedToR = false,
+                    isRecopyState = false
+            )
         }
+        return q
     }
 
-    private fun doRecopy(recopy: Recopy<T>): Pair<PersistentQueue<T>, Boolean> {
+    private fun doRecopy(): PersistentQueue<T> {
         var operationsToDo = 3
+
         var rn = r
-
-        var (_rn, sn, toCopy, isCopied) = recopy
-
-        while (operationsToDo > 0 && !isCopied && !rn.isEmpty()) {
+        var sn = s
+        while (operationsToDo > 0 && !isLCopiedToR && !rn.isEmpty()) {
             operationsToDo -= 1
 
             val (newRn, value) = rn.pop()
@@ -93,6 +146,7 @@ class PersistentQueue<T> private constructor(private val l: PersistentStack<T>,
         }
 
         var ln = l
+        var isCopied = isLCopiedToR
         while (operationsToDo > 0 && !ln.isEmpty()) {
             operationsToDo -= 1
             isCopied = true
@@ -102,6 +156,7 @@ class PersistentQueue<T> private constructor(private val l: PersistentStack<T>,
             rn = rn.push(value)
         }
 
+        var toCopy = toCopyFromSToR
         while (operationsToDo > 0 && toCopy > 0) {
             operationsToDo -= 1
             toCopy -= 1
@@ -111,8 +166,16 @@ class PersistentQueue<T> private constructor(private val l: PersistentStack<T>,
             rn = rn.push(value)
         }
 
-        val newRecopy = Recopy(_rn, sn, toCopy, isCopied)
-        return Pair(PersistentQueue(ln, _l, rn, newRecopy), toCopy == 0)
+        return PersistentQueue(
+                l = ln,
+                _l = _l,
+                r = rn,
+                _r = _r,
+                s = sn,
+                toCopyFromSToR = toCopy,
+                isLCopiedToR = isCopied,
+                isRecopyState = isRecopyState
+        )
     }
 
     data class DequeueResult<T>(val resultQueue: PersistentQueue<T>, val value: T)
